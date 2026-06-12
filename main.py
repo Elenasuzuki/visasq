@@ -230,27 +230,41 @@ def analyze_with_gemini(issues):
     return all_matched_items
 
 def send_notification(matched_items):
-    """結果をDiscordのWebhookに通知する"""
+    """結果をDiscordのWebhookに通知する（2000文字制限に対応して分割送信）"""
     if not matched_items:
         print("前日以降に公開された、マッチする新着案件はありませんでした。")
         return
 
-    text_lines = ["🔔 **ビザスク新着マッチング公募** \n"]
-
+    item_texts = []
     for item in matched_items:
-        text_lines.append(
+        item_texts.append(
             f"• **[{item['title']}]({item['url']})**\n"
             f"  *マッチ度:* {item['score']}/10\n"
             f"  *選定理由:* {item['reason']}\n"
         )
 
-    payload = {"content": "\n".join(text_lines)}
-    response = requests.post(WEBHOOK_URL, json=payload)
-    
-    if response.status_code in [200, 204]:
-        print(f"{len(matched_items)} 件の案件をDiscordに通知しました。")
-    else:
-        print(f"通知に失敗しました。ステータスコード: {response.status_code} - {response.text}")
+    # 2000文字以内に収まるようにチャンク分割
+    header = "🔔 **ビザスク新着マッチング公募** \n\n"
+    chunks = []
+    current = header
+    for text in item_texts:
+        if len(current) + len(text) + 1 > 1950:
+            chunks.append(current)
+            current = text
+        else:
+            current += "\n" + text
+    chunks.append(current)
+
+    for i, chunk in enumerate(chunks):
+        response = requests.post(WEBHOOK_URL, json={"content": chunk})
+        if response.status_code in [200, 204]:
+            print(f"通知 {i+1}/{len(chunks)} 送信成功")
+        else:
+            print(f"通知に失敗しました。ステータスコード: {response.status_code} - {response.text}")
+        if len(chunks) > 1:
+            time.sleep(1)
+
+    print(f"{len(matched_items)} 件の案件をDiscordに通知しました。")
 
 if __name__ == "__main__":
     print("スクレイピングを開始します...")
