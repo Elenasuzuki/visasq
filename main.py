@@ -160,18 +160,10 @@ def analyze_with_gemini(issues):
         【公募案件リスト】
         {json.dumps(chunk, ensure_ascii=False)}
 
-        【選定基準（超重要）】
-        以下の1と2の条件を「両方とも」満たす案件のみを抽出してください。
+        【選定基準（テストモード：日付フィルタを無効化中）】
+        以下の条件を満たす案件のみを抽出してください。
 
-        1. 日付のフィルタリング（前日以降のみ）
-           現在の日本時間は {today_ymd} です。
-           各案件のテキストに含まれる「公開日」「掲載日」などの日付を確認し、【昨日（{yesterday_ymd}）以降】に公開された新着案件のみを対象にしてください。
-           具体的には、以下のいずれかに該当するものだけを残し、一昨日以前の古い案件はマッチ度が高くても【絶対に除外】してください。
-           - 日付が {today_ymd} または {yesterday_ymd} であるもの
-           - 日付が {today_kanji} または {yesterday_kanji} であるもの
-           - テキスト内に「本日」「昨日」「〇時間前」「〇分前」といった相対的な新着表現があるもの
-
-        2. スキルのマッチング
+        1. スキルのマッチング（テストのため日付条件は無視してください）
            私の関心・経験領域、資格、話せるトピックのいずれかと親和性が高く、私が専門家としてアドバイス・貢献できる可能性が非常に高い案件（10点満点中7点以上）。
            特に「生成AI/LLMのビジネス導入・SaaS立ち上げ」「UXデザイン・Figma活用」「知財・特許戦略」「セキュア環境構築」「BtoBブランディング・マーケティング」に関するテーマは高めに評価してください。
         
@@ -263,8 +255,10 @@ if __name__ == "__main__":
     print(f"{len(raw_issues)} 件の公募を取得しました。AI解析にかけます...")
     
     if raw_issues:
-        filtered_issues = filter_by_keywords(raw_issues)
-        matched = analyze_with_gemini(filtered_issues) if filtered_issues else []
+        # TODO: テスト後にキーワードフィルタを有効化する
+        # filtered_issues = filter_by_keywords(raw_issues)
+        # matched = analyze_with_gemini(filtered_issues) if filtered_issues else []
+        matched = analyze_with_gemini(raw_issues)
         send_notification(matched)
     else:
         print("公募データが取得できませんでした。Cookieの期限切れの可能性があります。")
