@@ -197,7 +197,9 @@ def analyze_with_gemini(issues):
             if response.status_code == 200:
                 res_json = response.json()
                 response_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                print(f"  -> Geminiレスポンス（先頭200文字）: {response_text[:200]}")
+                import base64
+                print(f"  -> Geminiレスポンス長: {len(response_text)}文字")
+                print(f"  -> Base64: {base64.b64encode(response_text[:300].encode()).decode()}")
                 break
             elif response.status_code == 503:
                 wait_time = 6 * (retry + 1)
