@@ -2,7 +2,6 @@ import os
 import json
 import requests
 from playwright.sync_api import sync_playwright
-import google.generativeai as genai  # 確実に動く元のライブラリに戻す
 
 # 環境変数の読み込み
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -25,11 +24,8 @@ def get_visasq_issues():
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
 
-        # Cookieを設定してログイン状態をシミュレート
         if VISASQ_COOKIE_JSON:
             cookies = json.loads(VISASQ_COOKIE_JSON)
-            
-            # 【エラー修正】Playwrightが拒絶する不適切なsameSiteの値をクレンジング
             for cookie in cookies:
                 if "sameSite" in cookie:
                     val = str(cookie["sameSite"]).capitalize()
@@ -37,21 +33,17 @@ def get_visasq_issues():
                         cookie["sameSite"] = val
                     else:
                         cookie.pop("sameSite")
-
             context.add_cookies(cookies)
 
         page = context.new_page()
         page.goto("https://expert.visasq.com/issue/?is_open_only=true")
         page.wait_for_load_state("networkidle")
 
-        # 公募カード要素からテキストとリンクを抽出
         cards = page.query_selector_all("a[href*='/issue/']")
-        
         for card in cards:
             text = card.inner_text()
             href = card.get_attribute("href")
             url = f"https://expert.visasq{href}" if href.startswith("/") else href
-            
             if text:
                 issues.append({"url": url, "text": text.replace("\n", " ")})
 
@@ -59,9 +51,10 @@ def get_visasq_issues():
     return issues
 
 def analyze_with_gemini(issues):
-    """Gemini APIを使用して公募案件をフィルタリングする"""
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    """HTTPリクエスト（REST API）を使ってGemini APIで公募案件をフィルタリングする"""
+    # 2026年の標準モデルを使用
+    model_name = "gemini-2.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
 
     prompt = f"""
     あなたは優秀なビジネスエージェントです。
@@ -77,7 +70,7 @@ def analyze_with_gemini(issues):
     私の関心や経験領域とマッチ度が高い（10点満点中7点以上）と考えられる案件のみを抽出してください。
     
     【出力フォーマット】
-    必ず以下のMarkdown形式のJSON配列でのみ回答してください。合致する案件がない場合は空の配列 `[]` を返してください。雑談や解説のテキストは一切不要です。
+    必ず以下のJSON配列形式でのみ回答してください。合致する案件がない場合は空の配列 `[]` を返してください。
     [
       {{
         "title": "公募のタイトルまたは概要",
@@ -87,15 +80,28 @@ def analyze_with_gemini(issues):
       }}
     ]
     """
+
+    # Geminiに確実にJSONを吐き出させる設定
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
     
-    response = model.generate_content(prompt)
+    headers = {"Content-Type": "application/json"}
     
-    text_content = response.text.strip()
-    if text_content.startswith("```json"):
-        text_content = text_content.split("```json")[1].split("```")[0].strip()
-    elif text_content.startswith("```"):
-        text_content = text_content.split("```")[1].split("```")[0].strip()
+    # APIリクエストの実行
+    response = requests.post(url, headers=headers, json=payload)
+    if response.status_code != 200:
+        raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
         
+    res_json = response.json()
+    
+    # レスポンスからテキスト（JSON文字列）を抽出してパース
+    text_content = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
     return json.loads(text_content)
 
 def send_notification(matched_items):
