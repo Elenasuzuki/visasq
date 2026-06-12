@@ -8,7 +8,23 @@ from datetime import datetime, timedelta, timezone
 # 環境変数の読み込み
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 VISASQ_COOKIE_JSON = os.environ.get("VISASQ_COOKIE")
+VISASQ_EMAIL = os.environ.get("VISASQ_EMAIL")
+VISASQ_PASSWORD = os.environ.get("VISASQ_PASSWORD")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+
+# キーワード事前フィルタリング（LLMに渡す前に絞り込む）
+FILTER_KEYWORDS = [
+    "AI", "人工知能", "LLM", "生成AI", "ChatGPT", "機械学習", "ディープラーニング",
+    "新規事業", "0→1", "スタートアップ", "新サービス", "新プロダクト",
+    "DX", "デジタル変革", "デジタルトランスフォーメーション",
+    "SaaS", "プロダクト", "PdM", "プロダクトマネージャ",
+    "UX", "UI", "デザイン", "Figma",
+    "知財", "特許", "IP",
+    "ブランディング", "マーケティング",
+    "パッケージ", "包装", "包材",
+    "セキュリティ", "クラウド", "Azure", "Google Cloud",
+    "DevOps", "CI/CD", "アジャイル",
+]
 
 # フィルタリング基準
 MY_PROFILE = """
@@ -37,6 +53,19 @@ MY_PROFILE = """
 - Azure, Google Cloud, Dify, ChatGPT/Gemini Enterprise, GitHub Copilot, Figma
 """
 
+def login_with_credentials(page):
+    """メールアドレスとパスワードでログインする"""
+    print("メールアドレス・パスワードでログインします...")
+    page.goto("https://expert.visasq.com/auth/signin/")
+    page.wait_for_load_state("networkidle")
+    page.fill("input#username", VISASQ_EMAIL)
+    page.fill("input#password", VISASQ_PASSWORD)
+    page.click("button[type='submit']:not([value])")
+    page.wait_for_load_state("networkidle")
+    if "expert.visasq.com" not in page.url:
+        raise Exception(f"ログインに失敗しました。現在のURL: {page.url}")
+    print("ログイン成功。")
+
 def get_visasq_issues():
     """Playwrightを使ってログイン状態で公募情報を1〜5ページ目まで巡回取得する"""
     issues = []
@@ -44,7 +73,10 @@ def get_visasq_issues():
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
 
-        if VISASQ_COOKIE_JSON:
+        if VISASQ_EMAIL and VISASQ_PASSWORD:
+            page = context.new_page()
+            login_with_credentials(page)
+        elif VISASQ_COOKIE_JSON:
             cookies = json.loads(VISASQ_COOKIE_JSON)
             for cookie in cookies:
                 if "sameSite" in cookie:
@@ -54,10 +86,11 @@ def get_visasq_issues():
                     else:
                         cookie.pop("sameSite")
             context.add_cookies(cookies)
+            page = context.new_page()
+        else:
+            raise Exception("VISASQ_EMAIL/VISASQ_PASSWORD または VISASQ_COOKIE が設定されていません。")
 
-        page = context.new_page()
-
-        # 【修正】1ページ目から5ページ目まで巡回
+        # 1ページ目から5ページ目まで巡回
         for page_num in range(1, 6):
             print(f"{page_num} ページ目を読み込んでいます...")
             url = f"https://expert.visasq.com/issue/?is_open_only=true&page={page_num}"
@@ -74,7 +107,7 @@ def get_visasq_issues():
                 for card in cards:
                     text = card.inner_text()
                     href = card.get_attribute("href")
-                    card_url = f"https://expert.visasq{href}" if href.startswith("/") else href
+                    card_url = f"https://expert.visasq.com{href}" if href.startswith("/") else href
                     if text:
                         issues.append({"url": card_url, "text": text.replace("\n", " ")})
 
@@ -86,6 +119,15 @@ def get_visasq_issues():
 
         browser.close()
     return issues
+
+def filter_by_keywords(issues):
+    """キーワードに1つでもマッチする案件だけに絞り込む"""
+    matched = [
+        issue for issue in issues
+        if any(kw.lower() in issue["text"].lower() for kw in FILTER_KEYWORDS)
+    ]
+    print(f"キーワードフィルタリング: {len(issues)} 件 -> {len(matched)} 件")
+    return matched
 
 def analyze_with_gemini(issues):
     """Gemini APIを使用して、公募案件を25件ずつに分割して解析する（503エラー時の自動リトライ付き）"""
@@ -176,7 +218,14 @@ def analyze_with_gemini(issues):
 
         if response_text:
             try:
-                chunk_matched = json.loads(response_text)
+                # コードブロック（```json ... ```）が含まれる場合に除去
+                cleaned = response_text.strip()
+                if cleaned.startswith("```"):
+                    cleaned = cleaned.split("```", 2)[1]
+                    if cleaned.startswith("json"):
+                        cleaned = cleaned[4:]
+                    cleaned = cleaned.rsplit("```", 1)[0].strip()
+                chunk_matched = json.loads(cleaned)
                 all_matched_items.extend(chunk_matched)
             except Exception as parse_err:
                 print(f"JSONパースエラーが発生しました（スキップします）: {parse_err}")
@@ -214,7 +263,8 @@ if __name__ == "__main__":
     print(f"{len(raw_issues)} 件の公募を取得しました。AI解析にかけます...")
     
     if raw_issues:
-        matched = analyze_with_gemini(raw_issues)
+        filtered_issues = filter_by_keywords(raw_issues)
+        matched = analyze_with_gemini(filtered_issues) if filtered_issues else []
         send_notification(matched)
     else:
         print("公募データが取得できませんでした。Cookieの期限切れの可能性があります。")
