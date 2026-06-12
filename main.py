@@ -9,7 +9,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 VISASQ_COOKIE_JSON = os.environ.get("VISASQ_COOKIE")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# 【最適化】詳細なプロフィールと話せるトピックを格納
+# フィルタリング基準
 MY_PROFILE = """
 【職歴・コアスキル】
 - 大手企業（大日本印刷）にて約8年間、企画開発職（PdM、デザイン企画、WEBデザイナー）として従事。
@@ -37,7 +37,7 @@ MY_PROFILE = """
 """
 
 def get_visasq_issues():
-    """Playwrightを使ってログイン状態で公募情報を取得する"""
+    """Playwrightを使ってログイン状態で公募情報を1〜10ページ目まで巡回取得する"""
     issues = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -55,21 +55,36 @@ def get_visasq_issues():
             context.add_cookies(cookies)
 
         page = context.new_page()
-        page.goto("https://expert.visasq.com/issue/?is_open_only=true")
-        page.wait_for_load_state("networkidle")
 
-        print("ページをスクロールして直近の公募を読み込んでいます...")
-        for i in range(5):
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(1500)
+        # 1ページ目から10ページ目まで順にアクセス
+        for page_num in range(1, 11):
+            print(f"{page_num} ページ目を読み込んでいます...")
+            url = f"https://expert.visasq.com/issue/?is_open_only=true&page={page_num}"
+            
+            try:
+                page.goto(url)
+                page.wait_for_load_state("networkidle")
 
-        cards = page.query_selector_all("a[href*='/issue/']")
-        for card in cards:
-            text = card.inner_text()
-            href = card.get_attribute("href")
-            url = f"https://expert.visasq{href}" if href.startswith("/") else href
-            if text:
-                issues.append({"url": url, "text": text.replace("\n", " ")})
+                cards = page.query_selector_all("a[href*='/issue/']")
+                
+                # 該当ページに公募が1件もなければ、それ以降のページは無いと判断して終了
+                if not cards:
+                    print(f"{page_num} ページ目に公募が見つからないため、巡回を終了します。")
+                    break
+
+                for card in cards:
+                    text = card.inner_text()
+                    href = card.get_attribute("href")
+                    card_url = f"https://expert.visasq{href}" if href.startswith("/") else href
+                    if text:
+                        issues.append({"url": card_url, "text": text.replace("\n", " ")})
+
+                # サーバーに負荷をかけないよう、ページごとに1秒待つ
+                page.wait_for_timeout(1000)
+
+            except Exception as e:
+                print(f"{page_num} ページ目の取得中にエラーが発生しました: {e}")
+                break
 
         browser.close()
     return issues
