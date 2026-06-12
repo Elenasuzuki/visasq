@@ -256,6 +256,8 @@ if __name__ == "__main__":
     print("スクレイピングを開始します...")
     raw_issues = get_visasq_issues()
     print(f"{len(raw_issues)} 件の公募を取得しました。AI解析にかけます...")
+    if raw_issues:
+        print(f"サンプル（1件目）: {raw_issues[0]}")
     
     if raw_issues:
         # TODO: テスト後にキーワードフィルタを有効化する
