@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import time
 from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta, timezone
 
@@ -37,7 +38,7 @@ MY_PROFILE = """
 """
 
 def get_visasq_issues():
-    """Playwrightを使ってログイン状態で公募情報を1〜10ページ目まで巡回取得する"""
+    """Playwrightを使ってログイン状態で公募情報を1〜5ページ目まで巡回取得する"""
     issues = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -56,8 +57,8 @@ def get_visasq_issues():
 
         page = context.new_page()
 
-        # 1ページ目から10ページ目まで順にアクセス
-        for page_num in range(1, 11):
+        # 【修正】1ページ目から5ページ目まで巡回
+        for page_num in range(1, 6):
             print(f"{page_num} ページ目を読み込んでいます...")
             url = f"https://expert.visasq.com/issue/?is_open_only=true&page={page_num}"
             
@@ -66,8 +67,6 @@ def get_visasq_issues():
                 page.wait_for_load_state("networkidle")
 
                 cards = page.query_selector_all("a[href*='/issue/']")
-                
-                # 該当ページに公募が1件もなければ、それ以降のページは無いと判断して終了
                 if not cards:
                     print(f"{page_num} ページ目に公募が見つからないため、巡回を終了します。")
                     break
@@ -79,7 +78,6 @@ def get_visasq_issues():
                     if text:
                         issues.append({"url": card_url, "text": text.replace("\n", " ")})
 
-                # サーバーに負荷をかけないよう、ページごとに1秒待つ
                 page.wait_for_timeout(1000)
 
             except Exception as e:
@@ -90,7 +88,7 @@ def get_visasq_issues():
     return issues
 
 def analyze_with_gemini(issues):
-    """Gemini APIを使用して、前日以降の新着公募かつマッチ度の高い案件のみに絞り込む"""
+    """Gemini APIを使用して、公募案件を25件ずつに分割して解析する（503エラー時の自動リトライ付き）"""
     JST = timezone(timedelta(hours=9))
     now_jst = datetime.now(JST)
     
@@ -101,62 +99,91 @@ def analyze_with_gemini(issues):
 
     model_name = "gemini-2.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-
-    prompt = f"""
-    あなたは優秀なコンサルタントマッチングエージェントです。
-    以下の【私のプロフィール】と、スクレイピングで取得した【公募案件リスト】を比較分析してください。
-    
-    【私のプロフィール】
-    {MY_PROFILE}
-
-    【公募案件リスト】
-    {json.dumps(issues, ensure_ascii=False)}
-
-    【選定基準（超重要）】
-    以下の1と2の条件を「両方とも」満たす案件のみを抽出してください。
-
-    1. 日付のフィルタリング（前日以降のみ）
-       現在の日本時間は {today_ymd} です。
-       各案件のテキストに含まれる「公開日」「掲載日」などの日付を確認し、【昨日（{yesterday_ymd}）以降】に公開された新着案件のみを対象にしてください。
-       具体的には、以下のいずれかに該当するものだけを残し、一昨日以前の古い案件はマッチ度が高くても【絶対に除外】してください。
-       - 日付が {today_ymd} または {yesterday_ymd} であるもの
-       - 日付が {today_kanji} または {yesterday_kanji} であるもの
-       - テキスト内に「本日」「昨日」「〇時間前」「〇分前」といった相対的な新着表現があるもの
-
-    2. スキルのマッチング
-       私の関心・経験領域、資格、話せるトピックのいずれかと親和性が高く、私が専門家としてアドバイス・貢献できる可能性が非常に高い案件（10点満点中7点以上）。
-       特に「生成AI/LLMのビジネス導入・SaaS立ち上げ」「UXデザイン・Figma活用」「知財・特許戦略」「セキュア環境構築」「BtoBブランディング・マーケティング」に関するテーマは高めに評価してください。
-    
-    【出力フォーマット】
-    必ず以下のJSON配列形式でのみ回答してください。合致する案件がない場合は空の配列 `[]` を返してください。
-    [
-      {{
-        "title": "公募のタイトルまたは概要",
-        "url": "該当案件のURL",
-        "score": "マッチ度（10点満点）",
-        "reason": "私のプロフィールのどの経験（生成AI立ち上げ、UX先行要件定義、知財など）とどうマッチしているかの簡潔な理由（1行）"
-      }}
-    ]
-    """
-
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
-    }
-    
     headers = {"Content-Type": "application/json"}
-    
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code != 200:
-        raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
+
+    chunk_size = 25
+    all_matched_items = []
+
+    for i in range(0, len(issues), chunk_size):
+        chunk = issues[i:i + chunk_size]
+        print(f"公募データ {i+1} 〜 {min(i + chunk_size, len(issues))} 件目をAI解析中...")
+
+        prompt = f"""
+        # あなたは優秀なコンサルタントマッチングエージェントです。
+        以下の【私のプロフィール】と、スクレイピングで取得した【公募案件リスト（一部）】を比較分析してください。
         
-    res_json = response.json()
-    text_content = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-    return json.loads(text_content)
+        【私のプロフィール】
+        {MY_PROFILE}
+
+        【公募案件リスト】
+        {json.dumps(chunk, ensure_ascii=False)}
+
+        【選定基準（超重要）】
+        以下の1と2の条件を「両方とも」満たす案件のみを抽出してください。
+
+        1. 日付のフィルタリング（前日以降のみ）
+           現在の日本時間は {today_ymd} です。
+           各案件のテキストに含まれる「公開日」「掲載日」などの日付を確認し、【昨日（{yesterday_ymd}）以降】に公開された新着案件のみを対象にしてください。
+           具体的には、以下のいずれかに該当するものだけを残し、一昨日以前の古い案件はマッチ度が高くても【絶対に除外】してください。
+           - 日付が {today_ymd} または {yesterday_ymd} であるもの
+           - 日付が {today_kanji} または {yesterday_kanji} であるもの
+           - テキスト内に「本日」「昨日」「〇時間前」「〇分前」といった相対的な新着表現があるもの
+
+        2. スキルのマッチング
+           私の関心・経験領域、資格、話せるトピックのいずれかと親和性が高く、私が専門家としてアドバイス・貢献できる可能性が非常に高い案件（10点満点中7点以上）。
+           特に「生成AI/LLMのビジネス導入・SaaS立ち上げ」「UXデザイン・Figma活用」「知財・特許戦略」「セキュア環境構築」「BtoBブランディング・マーケティング」に関するテーマは高めに評価してください。
+        
+        【出力フォーマット】
+        必ず以下のJSON配列形式でのみ回答してください。合致する案件がない場合は空の配列 `[]` を返してください。雑談は一切不要です。
+        [
+          {{
+            "title": "公募のタイトルまたは概要",
+            "url": "該当案件のURL",
+            "score": "マッチ度（10点満点）",
+            "reason": "私のプロフィールのどの経験（生成AI立ち上げ、UX先行要件定義、知財など）とどうマッチしているかの簡潔な理由（1行）"
+          }}
+        ]
+        """
+
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "responseMimeType": "application/json"
+            }
+        }
+        
+        max_retries = 3
+        response_text = ""
+        
+        for retry in range(max_retries):
+            response = requests.post(url, headers=headers, json=payload)
+            
+            if response.status_code == 200:
+                res_json = response.json()
+                response_text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+                break
+            elif response.status_code == 503:
+                wait_time = 6 * (retry + 1)
+                print(f"  -> Gemini APIが混雑しています(503)。{wait_time}秒後に自動再試行します... ({retry + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
+        else:
+            print(f"警告: 503エラーが連続したため、このブロック（{i+1}件目〜）の解析をスキップします。")
+            continue
+
+        if response_text:
+            try:
+                chunk_matched = json.loads(response_text)
+                all_matched_items.extend(chunk_matched)
+            except Exception as parse_err:
+                print(f"JSONパースエラーが発生しました（スキップします）: {parse_err}")
+
+        time.sleep(2)
+
+    return all_matched_items
 
 def send_notification(matched_items):
     """結果をDiscordのWebhookに通知する"""
