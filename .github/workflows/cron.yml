@@ -2,20 +2,21 @@ name: Visasq Daily Watcher
 
 on:
   schedule:
-    # 毎日日本時間 AM 9:00 (UTC 0:00) に自動実行
     - cron: '0 0 * * *'
-  workflow_dispatch: # 手動実行ボタンを有効化
+  workflow_dispatch:
+
+# 【追加】Node.js 20の非推奨警告を完全に消し去るための設定
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   run-watcher:
     runs-on: ubuntu-latest
 
     steps:
-    # Node.js 24に対応した最新版(v6)に変更
     - name: Checkout repository
       uses: actions/checkout@v6
 
-    # cache: 'pip' を削除し、最新版に変更
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -24,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install playwright google-generativeai requests
+        pip install playwright requests
         playwright install chromium
 
     - name: Run Python Script
