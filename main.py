@@ -147,7 +147,7 @@ def analyze_with_gemini(issues):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
 
-    chunk_size = 25
+    chunk_size = 60
     all_matched_items = []
 
     for i in range(0, len(issues), chunk_size):
@@ -186,6 +186,8 @@ def analyze_with_gemini(issues):
            - 医療・製薬・法律・会計・金融商品の専門知識
            - 製造ライン・工場オペレーション・物流
            - 上記以外でも「私の実務経験に直接対応しない業界・職種の専門知見」を求める案件
+
+           マッチ度7点以上の案件のみ抽出してください。6点以下は除外してください。
         
         【出力フォーマット】
         必ず以下のJSON配列形式でのみ回答してください。合致する案件がない場合は空の配列 `[]` を返してください。雑談は一切不要です。
@@ -291,13 +293,8 @@ if __name__ == "__main__":
     raw_issues = get_visasq_issues()
     print(f"{len(raw_issues)} 件の公募を取得しました。AI解析にかけます...")
     if raw_issues:
-        print(f"サンプル（1件目）: {raw_issues[0]}")
-    
-    if raw_issues:
-        # TODO: テスト後にキーワードフィルタを有効化する
-        # filtered_issues = filter_by_keywords(raw_issues)
-        # matched = analyze_with_gemini(filtered_issues) if filtered_issues else []
-        matched = analyze_with_gemini(raw_issues)
+        filtered_issues = filter_by_keywords(raw_issues)
+        matched = analyze_with_gemini(filtered_issues) if filtered_issues else []
         send_notification(matched)
     else:
         print("公募データが取得できませんでした。Cookieの期限切れの可能性があります。")
