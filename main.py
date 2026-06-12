@@ -99,7 +99,7 @@ def get_visasq_issues():
                 page.goto(url)
                 page.wait_for_load_state("networkidle")
 
-                cards = page.query_selector_all("a[href*='/issue/']")
+                cards = page.query_selector_all("a[href*='/direct_interview/'], a[href*='/direct_recruitment/']")
                 if not cards:
                     print(f"{page_num} ページ目に公募が見つからないため、巡回を終了します。")
                     break
