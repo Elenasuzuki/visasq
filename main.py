@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from playwright.sync_api import sync_playwright
-from google import genai  # 2026年最新のGemini SDK
+import google.generativeai as genai  # 確実に動く元のライブラリに戻す
 
 # 環境変数の読み込み
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -32,12 +32,10 @@ def get_visasq_issues():
             # 【エラー修正】Playwrightが拒絶する不適切なsameSiteの値をクレンジング
             for cookie in cookies:
                 if "sameSite" in cookie:
-                    # 頭文字を大文字にする (例: "lax" -> "Lax")
                     val = str(cookie["sameSite"]).capitalize()
                     if val in ["Strict", "Lax", "None"]:
                         cookie["sameSite"] = val
                     else:
-                        # "unspecified" などの無効な値は属性ごと削除してブラウザに任せる
                         cookie.pop("sameSite")
 
             context.add_cookies(cookies)
@@ -62,8 +60,8 @@ def get_visasq_issues():
 
 def analyze_with_gemini(issues):
     """Gemini APIを使用して公募案件をフィルタリングする"""
-    # 最新のクライアント初期化方法
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     prompt = f"""
     あなたは優秀なビジネスエージェントです。
@@ -90,11 +88,7 @@ def analyze_with_gemini(issues):
     ]
     """
     
-    # 最新のAPI呼び出し形式に変更
-    response = client.models.generate_content(
-        model="gemini-1.5-flash",
-        contents=prompt
-    )
+    response = model.generate_content(prompt)
     
     text_content = response.text.strip()
     if text_content.startswith("```json"):
