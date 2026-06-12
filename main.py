@@ -60,7 +60,7 @@ def login_with_credentials(page):
     page.wait_for_load_state("networkidle")
     page.fill("input#username", VISASQ_EMAIL)
     page.fill("input#password", VISASQ_PASSWORD)
-    page.click("button[type='submit']:not([value])")
+    page.get_by_role("button", name="ログイン").click()
     page.wait_for_load_state("networkidle")
     if "expert.visasq.com" not in page.url:
         raise Exception(f"ログインに失敗しました。現在のURL: {page.url}")
