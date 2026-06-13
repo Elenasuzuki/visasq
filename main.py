@@ -195,6 +195,7 @@ def analyze_with_gemini(issues):
           {{
             "title": "公募のタイトルまたは概要",
             "url": "該当案件のURL",
+            "deadline": "募集終了日（例：2026/06/19）。テキストに「募集期間：YYYY/MM/DD 〜 YYYY/MM/DD」があればその終了日。不明な場合は「不明」",
             "score": "マッチ度（10点満点）",
             "reason": "私のプロフィールのどの経験（生成AI立ち上げ、UX先行要件定義、知財など）とどうマッチしているかの簡潔な理由（1行）"
           }}
@@ -259,9 +260,10 @@ def send_notification(matched_items):
 
     item_texts = []
     for item in matched_items:
+        deadline = item.get('deadline', '不明')
         item_texts.append(
             f"• **[{item['title']}]({item['url']})**\n"
-            f"  *マッチ度:* {item['score']}/10\n"
+            f"  *締切:* {deadline}　*マッチ度:* {item['score']}/10\n"
             f"  *選定理由:* {item['reason']}\n"
         )
 
