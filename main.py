@@ -265,7 +265,8 @@ def send_notification(matched_items):
         deadline = item.get('deadline', '不明')
         item_texts.append(
             f"• **[{item['title']}]({item['url']})**\n"
-            f"  *公開:* {published}　*締切:* {deadline}　*マッチ度:* {item['score']}/10\n"
+            f"  *マッチ度:* {item['score']}/10\n"
+            f"  *公開:* {published}　*締切:* {deadline}\n"
             f"  *選定理由:* {item['reason']}\n"
         )
 
