@@ -143,7 +143,7 @@ def analyze_with_gemini(issues):
     today_kanji = now_jst.strftime("%Y年%m月%d日")
     yesterday_kanji = (now_jst - timedelta(days=1)).strftime("%Y年%m月%d日")
 
-    model_name = "gemini-2.5-flash"
+    model_name = "gemini-2.0-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
 
